@@ -28,7 +28,8 @@ cmake --build build --config Release
   `cmake_minimum_required(3.0)` needs the `CMAKE_POLICY_VERSION_MINIMUM`
   escape hatch in CMakeLists (expect one harmless upstream warning).
 - CLI smoke test: `scene_editor model.glb sky.hdr test.savetest`
-  (.savetest = save the scene then immediately reload it).
+  (.savetest = save the scene then immediately reload it). Debug flag:
+  `--mateditor` opens the material windows and selects the first material.
 - Unit tests: `cmake --build build --target tests && build/bin/tests.exe`.
 
 ## Architecture
@@ -188,7 +189,12 @@ lives in.
   opposite direction from spawn graphs. The node canvas in app_panels.cpp
   (`matEdCanvas`/`matEdParamsPanel`) mirrors the Spawn Logic one with
   multi-input pins. PNG export goes through stb_image_write +
-  `writeFileBytes` (UTF-8 paths).
+  `writeFileBytes` (UTF-8 paths). The 3D sphere preview is a SEPARATE
+  window ("Material Preview", own FBO + `matpreview` shader, drag-to-orbit,
+  256px bake); the debounced rebake lives in the run loop — never gate it
+  on a panel being open (that was the "black sphere" bug). CLI debug flag:
+  `--mateditor` opens the three material windows + selects the first
+  material.
 - **Simulation**: `SimController` (GL-free, unit-tested) continuously
   re-resolves each graph from the root; a changed resolution restarts that
   action chain. RandomChance latches per session (re-roll = restart);

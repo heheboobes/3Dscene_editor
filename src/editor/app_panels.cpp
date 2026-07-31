@@ -1697,7 +1697,9 @@ void App::drawMaterialEdContent() {
     if (ImGui::Button("Reset view")) matEdScroll_ = glm::vec2(0.0f);
     ImGui::Separator();
 
-    ImGui::BeginChild("##matedparams", ImVec2(260.0f, 0.0f), true);
+    // Node editor: params column + canvas (the 3D sphere lives in the
+    // separate Material Preview window).
+    ImGui::BeginChild("##matedparams", ImVec2(260.0f, 0.0f), false);
     matEdParamsPanel(*g);
     ImGui::EndChild();
     ImGui::SameLine();
@@ -1706,6 +1708,43 @@ void App::drawMaterialEdContent() {
                       ImGuiWindowFlags_NoScrollWithMouse);
     matEdCanvas(*g);
     ImGui::EndChild();
+}
+
+// Separate 3D preview window: the baked material on a sphere (drag to
+// orbit), auto-sized to the window like the main viewport.
+void App::drawMatPreviewContent() {
+    MaterialGraph* g = materials_.findMaterial(selectedMaterialId_);
+    if (!g) {
+        ImGui::TextDisabled("Select a material first (Materials panel).");
+        return;
+    }
+    ImGui::Text("%s", g->name.c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("(drag to orbit)");
+    ImGui::Separator();
+
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    float dpiX = winWidth_  > 0 ? float(fbWidth_)  / float(winWidth_)  : 1.0f;
+    float dpiY = winHeight_ > 0 ? float(fbHeight_) / float(winHeight_) : 1.0f;
+    int wantW = int(avail.x * dpiX + 0.5f);
+    int wantH = int(avail.y * dpiY + 0.5f);
+    if (wantW >= 64 && wantH >= 64) {
+        matSphereW_ = wantW;
+        matSphereH_ = wantH;
+    }
+    if (matSphereColor_.id() != 0 && matSphereW_ > 0) {
+        ImGui::Image((ImTextureID)(intptr_t)matSphereColor_.id(), avail,
+                     ImVec2(0, 1), ImVec2(1, 0));
+        if (ImGui::IsItemActive() &&
+            ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+            ImVec2 d = ImGui::GetIO().MouseDelta;
+            matSphereYaw_ += d.x * 0.01f;
+            matSpherePitch_ = std::clamp(matSpherePitch_ - d.y * 0.01f,
+                                         -1.4f, 1.4f);
+        }
+    } else {
+        ImGui::TextDisabled("(rendering...)");
+    }
 }
 
 void App::matEdParamsPanel(MaterialGraph& g) {

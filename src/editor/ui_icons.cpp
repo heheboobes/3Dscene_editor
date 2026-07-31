@@ -347,6 +347,18 @@ static void CatWeather(ImDrawList* dl, ImVec2 p0, ImVec2 p1, ImU32 col) {
 
 
 
+static void CatMatView(ImDrawList* dl, ImVec2 p0, ImVec2 p1, ImU32 col) {
+    // Shaded sphere: circle with a highlight and a terminator arc.
+    float w = p1.x - p0.x;
+    ImVec2 c((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
+    float r = w * 0.34f;
+    dl->AddCircle(c, r, col, 0, 2.0f);
+    dl->PathArcTo(ImVec2(c.x + r * 0.15f, c.y + r * 0.1f), r * 0.75f,
+                  1.2f, 3.6f, 10);
+    dl->PathStroke(col, 0, 1.6f);
+    dl->AddCircleFilled(ImVec2(c.x - r * 0.35f, c.y - r * 0.35f),
+                        r * 0.18f, col);
+}
 static void CatMaterials(ImDrawList* dl, ImVec2 p0, ImVec2 p1, ImU32 col) {
     // Artist palette: circle outline with three paint blobs and a hole.
     float w = p1.x - p0.x;
@@ -394,6 +406,7 @@ IconFn catIcon(int cat) {
         case App::CatSim:        return &CatSim;
         case App::CatWeather:    return &CatWeather;
         case App::CatMaterials:  return &CatMaterials;
+        case App::CatMatView:    return &CatMatView;
         default: return nullptr;
     }
 }
@@ -417,6 +430,7 @@ const char* catName(int cat) {
         case App::CatSim:        return "Simulation";
         case App::CatWeather:    return "Weather";
         case App::CatMaterials:  return "Materials";
+        case App::CatMatView:    return "Material Preview";
         default: return "?";
     }
 }

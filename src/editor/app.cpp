@@ -112,6 +112,10 @@ bool App::initOpenGL() {
                                       shaderDir_ + "/weather.frag")) {
         return false;
     }
+    if (!matPreviewShader_.loadFromFile(shaderDir_ + "/matpreview.vert",
+                                         shaderDir_ + "/matpreview.frag")) {
+        return false;
+    }
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
@@ -259,6 +263,13 @@ void App::shutdown() {
         if (viewportDepthRbo_) { glDeleteRenderbuffers(1, &viewportDepthRbo_); viewportDepthRbo_ = 0; }
         noiseTex_.destroy();
         matPreviewTex_.destroy();
+        sphereVao_.destroy();
+        sphereVbo_.destroy();
+        sphereEbo_.destroy();
+        if (matSphereFbo_) { glDeleteFramebuffers(1, &matSphereFbo_); matSphereFbo_ = 0; }
+        matSphereColor_.destroy();
+        if (matSphereDepthRbo_) { glDeleteRenderbuffers(1, &matSphereDepthRbo_); matSphereDepthRbo_ = 0; }
+        matPreviewShader_.destroy();
         for (auto& p : camPreviews_) {
             if (p.fbo)      glDeleteFramebuffers(1, &p.fbo);
             if (p.depthRbo) glDeleteRenderbuffers(1, &p.depthRbo);
@@ -283,6 +294,17 @@ int App::run(const std::vector<std::string>& importArgs) {
 
     // Import any models / sky passed on the command line (useful for testing).
     for (const auto& p : importArgs) {
+        // Debug/testing flag: open the material windows at startup.
+        if (p == "--mateditor") {
+            showMaterials_ = true;
+            showMaterialEd_ = true;
+            showMatPreview_ = true;
+            if (!materials_.materials().empty()) {
+                selectedMaterialId_ = materials_.materials().front().id;
+                markMaterialPreviewDirty();
+            }
+            continue;
+        }
         std::string ext;
         auto dot = p.find_last_of('.');
         if (dot != std::string::npos) ext = p.substr(dot);
@@ -326,6 +348,9 @@ int App::run(const std::vector<std::string>& importArgs) {
         updateSimulation(dt);
         timeSec_ += dt;
         weather_.update(dt, weather_.params, camera_.position(), timeSec_);
+        // Debounced material preview rebake (panel visibility independent).
+        if (matPreviewDirty_ && glfwGetTime() - matPreviewDirtyAt_ > 0.25)
+            rebakeMaterialPreview();
 
         // Resize handling
         int curFbW = 0, curFbH = 0;
@@ -344,6 +369,9 @@ int App::run(const std::vector<std::string>& importArgs) {
         renderScene();
         // Camera View thumbnails: at most one small FBO render per frame.
         updateCameraPreviews();
+        // Material Editor sphere preview (own FBO, only while the window is
+        // open).
+        renderMaterialPreview();
 
         // UI (dockspace + windows incl. the viewport image) into the default
         // framebuffer.
@@ -1311,16 +1339,148 @@ void App::rebakeMaterialPreview() {
     MaterialGraph* g = materials_.findMaterial(selectedMaterialId_);
     if (!g) return;
     std::vector<uint8_t> pix;
-    if (!bakeMaterial(*g, 128, 128, pix)) return;
+    if (!bakeMaterial(*g, 256, 256, pix)) return;
     if (!matPreviewTex_.id()) matPreviewTex_.create();
     glBindTexture(GL_TEXTURE_2D, matPreviewTex_);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 128, 128, 0, GL_RGBA,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 256, 0, GL_RGBA,
                  GL_UNSIGNED_BYTE, pix.data());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+// ---------------------------------------------------------------------------
+// 3D material preview (sphere) resources + render.
+
+void App::ensureMatSphereResources() {
+    // UV sphere mesh (unit radius), generated once.
+    if (!sphereVao_.id()) {
+        const int stacks = 24, slices = 48;
+        std::vector<float> verts;   // pos(3) normal(3) uv(2)
+        std::vector<uint32_t> idx;
+        const float pi = 3.14159265358979f;
+        for (int i = 0; i <= stacks; ++i) {
+            float phi = pi * float(i) / float(stacks);
+            float sp = std::sin(phi), cp = std::cos(phi);
+            for (int j = 0; j <= slices; ++j) {
+                float theta = 2.0f * pi * float(j) / float(slices);
+                float x = sp * std::cos(theta);
+                float y = cp;
+                float z = sp * std::sin(theta);
+                verts.insert(verts.end(),
+                    {x, y, z, x, y, z,
+                     float(j) / float(slices), float(i) / float(stacks)});
+            }
+        }
+        for (int i = 0; i < stacks; ++i)
+            for (int j = 0; j < slices; ++j) {
+                uint32_t a = uint32_t(i * (slices + 1) + j);
+                uint32_t b = a + uint32_t(slices + 1);
+                idx.insert(idx.end(), {a, b, a + 1, a + 1, b, b + 1});
+            }
+        sphereIndexCount_ = (int)idx.size();
+
+        sphereVao_.create();
+        sphereVbo_.create();
+        sphereEbo_.create();
+        glBindVertexArray(sphereVao_);
+        glBindBuffer(GL_ARRAY_BUFFER, sphereVbo_);
+        glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts.size() * sizeof(float)),
+                     verts.data(), GL_STATIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sphereEbo_);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                     GLsizeiptr(idx.size() * sizeof(uint32_t)), idx.data(),
+                     GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
+                              (void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
+                              (void*)(3 * sizeof(float)));
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
+                              (void*)(6 * sizeof(float)));
+        glBindVertexArray(0);
+    }
+
+    if (!matSphereFbo_) {
+        glGenFramebuffers(1, &matSphereFbo_);
+        matSphereColor_.create();
+        glGenRenderbuffers(1, &matSphereDepthRbo_);
+    }
+    if (matSphereW_ <= 0 || matSphereH_ <= 0) return;
+
+    GLint cw = 0, ch = 0;
+    glBindTexture(GL_TEXTURE_2D, matSphereColor_);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &cw);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ch);
+    if (cw == matSphereW_ && ch == matSphereH_) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return;
+    }
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, matSphereW_, matSphereH_, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, matSphereDepthRbo_);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24,
+                          matSphereW_, matSphereH_);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, matSphereFbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, matSphereColor_, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                              GL_RENDERBUFFER, matSphereDepthRbo_);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void App::renderMaterialPreview() {
+    if (!showMatPreview_) return;
+    MaterialGraph* g = materials_.findMaterial(selectedMaterialId_);
+    if (!g || matSphereW_ < 64 || matSphereH_ < 64) return;
+    // First paint must not wait for the 250 ms debounce.
+    if (matPreviewTex_.id() == 0) rebakeMaterialPreview();
+    ensureMatSphereResources();
+
+    glBindFramebuffer(GL_FRAMEBUFFER, matSphereFbo_);
+    glViewport(0, 0, matSphereW_, matSphereH_);
+    glClearColor(0.115f, 0.125f, 0.155f, 1.0f);
+    glClearDepthf(1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    float aspect = float(matSphereW_) / float(matSphereH_);
+    float cp = std::cos(matSpherePitch_), sp = std::sin(matSpherePitch_);
+    float cy = std::cos(matSphereYaw_),  sy = std::sin(matSphereYaw_);
+    glm::vec3 camPos(3.2f * cp * sy, 3.2f * sp, 3.2f * cp * cy);
+    glm::mat4 view = glm::lookAt(camPos, glm::vec3(0.0f),
+                                 glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 proj = glm::perspective(glm::radians(38.0f), aspect,
+                                      0.1f, 20.0f);
+
+    matPreviewShader_.use();
+    matPreviewShader_.setMat4("uViewProj", proj * view);
+    // Slow showcase spin; dragging the preview orbits the camera on top.
+    glm::mat4 model = glm::rotate(glm::mat4(1.0f), timeSec_ * 0.35f,
+                                  glm::vec3(0.0f, 1.0f, 0.0f));
+    matPreviewShader_.setMat4("uModel", model);
+    matPreviewShader_.setVec3("uLightDir",
+        glm::normalize(glm::vec3(-0.5f, 0.85f, -0.6f)));
+    matPreviewShader_.setVec3("uCamPos", camPos);
+    matPreviewShader_.setInt("uAlbedo", 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, matPreviewTex_);
+    glBindVertexArray(sphereVao_);
+    glDrawElements(GL_TRIANGLES, sphereIndexCount_, GL_UNSIGNED_INT, nullptr);
+    glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void App::updateCamAnim(float dt) {

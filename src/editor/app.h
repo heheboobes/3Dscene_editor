@@ -42,7 +42,7 @@ public:
         CatFile,
         CatCameras, CatCamView,
         CatSpawns, CatSim,
-        CatWeather, CatMaterials,
+        CatWeather, CatMaterials, CatMatView,
         CatCount
     };
 
@@ -60,6 +60,7 @@ public:
     Shader skyboxConvertShader_;
     Shader blockShader_;
     Shader weatherShader_;
+    Shader matPreviewShader_;
     WeatherSystem weather_;   // params persisted in the scene
     float timeSec_ = 0.0f;    // app time for wind sway / snow drift
     Skybox skybox_;
@@ -135,6 +136,7 @@ public:
     void drawWeatherContent();
     void drawMaterialsContent();
     void drawMaterialEdContent();
+    void drawMatPreviewContent();
     // Material graph edit with undo: capture before, mutate, then push.
     void pushMaterialGraphEdit(int matId, const char* name, bool mergeable,
                                const MaterialGraph& before);
@@ -197,6 +199,7 @@ public:
     bool showWeather_   = false;
     bool showMaterials_ = false;
     bool showMaterialEd_= false;
+    bool showMatPreview_= false;
 
     // Scene cameras: frustum visualisation + preview window options.
     bool showCamFrustums_ = true;
@@ -309,10 +312,24 @@ private:
     void matEdParamsPanel(MaterialGraph& g);
     void matEdCanvas(MaterialGraph& g);
 
-    // Baked 128px preview of the selected material (debounced rebake).
+    // Baked 256px preview of the selected material (debounced rebake).
     GlTexture matPreviewTex_;
     bool matPreviewDirty_ = false;
     double matPreviewDirtyAt_ = 0.0;
+
+    // 3D material preview: UV sphere in its own FBO (top of the Material
+    // Editor window), orbit camera rotated by dragging the image.
+    GLuint matSphereFbo_ = 0;
+    GlTexture matSphereColor_;
+    GLuint matSphereDepthRbo_ = 0;
+    int matSphereW_ = 0, matSphereH_ = 0;
+    GlVertexArray sphereVao_;
+    GlBuffer sphereVbo_;
+    GlBuffer sphereEbo_;
+    int sphereIndexCount_ = 0;
+    float matSphereYaw_ = 0.6f, matSpherePitch_ = 0.35f;
+    void ensureMatSphereResources();
+    void renderMaterialPreview();
 
     // Camera preview window: small per-camera FBOs, rendered one camera per
     // frame (round-robin) — never all cameras in a single frame.
@@ -349,6 +366,7 @@ private:
     void drawWeatherWindow();
     void drawMaterialsWindow();
     void drawMaterialEdWindow();
+    void drawMatPreviewWindow();
     void buildDefaultLayout(unsigned int dockspaceId);
     void ensureViewportFbo();
 

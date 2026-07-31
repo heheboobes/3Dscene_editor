@@ -67,6 +67,7 @@ void App::renderImGui() {
     drawWeatherWindow();
     drawMaterialsWindow();
     drawMaterialEdWindow();
+    drawMatPreviewWindow();
     if (showHelp_) drawHelpOverlay();
 
     // Brush value overlay: show radius/strength over the viewport image while
@@ -162,11 +163,18 @@ void App::buildDefaultLayout(unsigned int dockspaceId) {
     ImGui::DockBuilderDockWindow("Tools", dockTools);
     ImGui::DockBuilderDockWindow("Hierarchy", dockHierarchy);
     ImGui::DockBuilderDockWindow("Inspector", dockRight);
-    // Camera View / Spawn Logic share the centre node with the Viewport;
-    // docking them first keeps the Viewport the visible tab.
+    // The bottom half of the centre column belongs to material work:
+    // Material Editor (nodes) + Materials (library) as tabs.
+    ImGuiID dockBottom = ImGui::DockBuilderSplitNode(remaining, ImGuiDir_Down,
+                                                     0.45f, nullptr, &remaining);
+    ImGui::DockBuilderDockWindow("Material Editor", dockBottom);
+    ImGui::DockBuilderDockWindow("Materials", dockBottom);
+    // Camera View / Spawn Logic / Material Preview share the centre node
+    // with the Viewport as tabs; docking them first keeps the Viewport the
+    // visible tab.
     ImGui::DockBuilderDockWindow("Camera View", remaining);
     ImGui::DockBuilderDockWindow("Spawn Logic", remaining);
-    ImGui::DockBuilderDockWindow("Material Editor", remaining);
+    ImGui::DockBuilderDockWindow("Material Preview", remaining);
     ImGui::DockBuilderDockWindow("Viewport", remaining);
     // Hidden-by-default windows get sensible homes for when they are shown.
     ImGui::DockBuilderDockWindow("Terrain", dockTools);
@@ -178,7 +186,6 @@ void App::buildDefaultLayout(unsigned int dockspaceId) {
     ImGui::DockBuilderDockWindow("Spawns", dockHierarchy);
     ImGui::DockBuilderDockWindow("Simulation", dockRight);
     ImGui::DockBuilderDockWindow("Weather", dockRight);
-    ImGui::DockBuilderDockWindow("Materials", dockRight);
     ImGui::DockBuilderFinish(id);
 }
 
@@ -295,6 +302,7 @@ void App::drawToolbarWindow() {
         { CatSim,     "Simulation",       &showSimulation_},
         { CatWeather, "Weather",          &showWeather_   },
         { CatMaterials, "Materials",      &showMaterials_ },
+        { CatMatView, "Material Preview", &showMatPreview_},
     };
     for (auto& p : panels) {
         if (iconCell(icons::catIcon(p.cat), p.name, *p.flag))
@@ -535,9 +543,6 @@ void App::drawWeatherWindow() {
 
 void App::drawMaterialsWindow() {
     if (!showMaterials_) return;
-    // Debounced live preview rebake (slider drags coalesce into one bake).
-    if (matPreviewDirty_ && glfwGetTime() - matPreviewDirtyAt_ > 0.25)
-        rebakeMaterialPreview();
     if (ImGui::Begin("Materials", &showMaterials_))
         drawMaterialsContent();
     ImGui::End();
@@ -547,6 +552,13 @@ void App::drawMaterialEdWindow() {
     if (!showMaterialEd_) return;
     if (ImGui::Begin("Material Editor", &showMaterialEd_))
         drawMaterialEdContent();
+    ImGui::End();
+}
+
+void App::drawMatPreviewWindow() {
+    if (!showMatPreview_) return;
+    if (ImGui::Begin("Material Preview", &showMatPreview_))
+        drawMatPreviewContent();
     ImGui::End();
 }
 
