@@ -28,7 +28,14 @@ static std::string baseDirOf(const std::string& path) {
     std::string p = path;
     std::replace(p.begin(), p.end(), '\\', '/');
     size_t slash = p.find_last_of('/');
-    return (slash != std::string::npos) ? p.substr(0, slash) : ".";
+    if (slash == std::string::npos) return ".";
+    std::string dir = p.substr(0, slash);
+    // "D:" alone is a drive-RELATIVE path (current dir on drive D:), not the
+    // drive root — joining "D:" / "file" yields "D:file" and every relative
+    // asset path breaks. Keep the root slash so it stays absolute ("D:/").
+    if (!dir.empty() && dir.back() == ':') dir += '/';
+    if (dir.empty()) dir = "/";   // "/file.scene" — root of the current drive
+    return dir;
 }
 
 static std::string relPath(const std::string& absPath, const std::string& baseDir) {
